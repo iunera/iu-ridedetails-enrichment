@@ -1,0 +1,68 @@
+# https://github.com/apache/flink-kubernetes-operator/blob/main/examples/pod-template.yaml
+apiVersion: flink.apache.org/v1beta1
+kind: FlinkDeployment
+metadata:
+  name: iu-ridedetails-ingestion
+  namespace: fahrbar-jobs
+spec:
+  image: iunera/iu-ridedetails-ingestion:docker_image_tag
+  flinkVersion: v1_17
+  flinkConfiguration:
+    taskmanager.memory.process.size: 10g # muss höher sein als taskmanager.memory.flink.size
+    taskmanager.memory.flink.size: 9g
+    taskmanager.memory.managed.fraction: 0.1 # default is 0.4 # not sure what i'm doing here. I think this shows the fraction between taskmanager.memory.process.size and taskmanager.memory.flink.size
+    # taskmanager.network.memory.fraction: 0.1
+    # taskmanager.network.memory.min: 20m
+    state.backend.fs.checkpointdir: file:///checkpoints/flink/checkpoints
+    state.checkpoints.dir: file:///checkpoints/flink/externalized-checkpoints
+    state.savepoints.dir: file:///checkpoints/flink/savepoints
+    web.upload.dir: /opt/flink
+
+  jobManager:
+    resources:
+      requests:
+        memory: "500Mi"
+        cpu: "0.02"
+    replicas: 1
+    nodeSelector:
+      role: service-node
+
+  taskManager:
+    taskSlots: 1
+    resources:
+      limits:
+        memory: "10Gi"
+        cpu: "3"
+      requests:
+        memory: "4000Mi"
+        cpu: "0.2"
+    nodeSelector:
+      role: service-node
+
+  job:
+    jarURI: local:///opt/flink/flink-web-upload/iu-ridedetails-enrichment-2.0.0.jar
+    parallelism: 4
+    entryClass: com.iunera.publictransport.afzsingestor.staticimports.rideeventreducer.GenericRideEventGeoAggregationJob
+    programArgs: '--inputTopic iu-fahrbar-prod-linematched-general-v1; --job_name=gernericimportv1"'
+    state: running
+    upgradeMode: stateless
+    args:
+      - --add-opens java.base/java.lang=ALL-UNNAMED
+      - --add-opens java.base/java.util=ALL-UNNAMED
+      - --add-opens java.base/java.util.concurrent.atomic=ALL-UNNAMED
+
+  volumeMounts:
+    - mountPath: /checkpoints
+      name: checkpoints
+    - mountPath: /buckets/druidimport
+      name: s3data
+      subPath: druidimport
+      readOnly: false
+
+  volumes:
+    - name: checkpoints
+      persistentVolumeClaim:
+        claimName: checkpoints
+    - name: s3data
+      persistentVolumeClaim:
+        claimName: datainbound-pvc
